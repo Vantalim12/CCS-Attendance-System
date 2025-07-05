@@ -135,14 +135,17 @@ export const createEvent = async (req: Request, res: Response) => {
       attendanceRequiredAfternoon: req.body.attendanceRequiredAfternoon ?? true,
       scanWindowMinutes: req.body.scanWindowMinutes ?? 15,
       gracePeriodMinutes: req.body.gracePeriodMinutes ?? 60,
-      createdBy: (req as any).user?.id,
+      organizationId: req.body.organizationId || "507f1f77bcf86cd799439011", // Default org
+      createdBy: (req as any).user?.userId,
     };
 
     const event = await Event.create(eventData);
     res.status(201).json(event);
   } catch (error: any) {
     console.error("Error creating event:", error);
-    res.status(500).json({ message: "Failed to create event" });
+    res
+      .status(500)
+      .json({ message: "Failed to create event", error: error.message });
   }
 };
 

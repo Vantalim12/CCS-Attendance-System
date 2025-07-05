@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import QRCode from "qrcode";
 
 export function parseQRCode(qrData: string) {
   // Example format: studentId-organizationId-timestampHash
@@ -16,11 +17,11 @@ export function validateQRCode(qrData: string, orgSecret: string): boolean {
   return true;
 }
 
-export function generateQRCode(
+export async function generateQRCode(
   studentId: string,
   studentName: string,
   returnBase64: boolean = false
-): string {
+): Promise<string> {
   // Generate a unique QR code data string
   const organizationId = "DEFAULT_ORG"; // This should come from context in real implementation
   const timestamp = Date.now().toString();
@@ -33,27 +34,34 @@ export function generateQRCode(
   const qrData = `${studentId}-${organizationId}-${hash}`;
 
   if (returnBase64) {
-    // In a real implementation, you would use a QR code library like 'qrcode'
-    // to generate an actual QR code image and return it as base64
-    // For now, we'll return a placeholder base64 image
-    return generatePlaceholderQRBase64(qrData);
+    try {
+      // Generate actual QR code as base64 data URL
+      const qrCodeDataURL = await QRCode.toDataURL(qrData, {
+        margin: 1,
+        color: {
+          dark: "#000000",
+          light: "#FFFFFF",
+        },
+        width: 200,
+      });
+      return qrCodeDataURL.split(",")[1]; // Return just the base64 part without data:image/png;base64,
+    } catch (error) {
+      console.error("Error generating QR code:", error);
+      return generatePlaceholderQRBase64(qrData);
+    }
   }
 
   return qrData;
 }
 
 function generatePlaceholderQRBase64(qrData: string): string {
-  // This is a placeholder. In real implementation, use a library like 'qrcode':
-  // const QRCode = require('qrcode');
-  // return await QRCode.toDataURL(qrData);
-
-  // For now, return a placeholder base64 image (1x1 pixel PNG)
+  // Fallback placeholder base64 image (1x1 pixel PNG)
   const placeholder =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
   return placeholder;
 }
 
 // Function to create QR code from student data (for actual QR generation)
-export function createStudentQRData(student: any): string {
-  return generateQRCode(student.studentId, student.studentName);
+export async function createStudentQRData(student: any): Promise<string> {
+  return await generateQRCode(student.studentId, student.studentName);
 }

@@ -7,11 +7,29 @@ import {
   deleteAttendance,
   manualSignIn,
   manualSignOut,
+  generateReport,
+  exportToExcel,
+  exportToPDF,
 } from "../controllers/attendance.controller";
 import { authenticateJWT } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/rbac.middleware";
 
 const router = Router();
+
+// Report generation routes (must come before /:id route)
+router.get(
+  "/report",
+  authenticateJWT,
+  authorizeRoles("admin", "student"),
+  generateReport
+);
+router.get("/export", authenticateJWT, authorizeRoles("admin"), exportToExcel);
+router.get(
+  "/export/pdf",
+  authenticateJWT,
+  authorizeRoles("admin"),
+  exportToPDF
+);
 
 router.get(
   "/",

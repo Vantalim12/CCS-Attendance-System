@@ -5,6 +5,8 @@ import {
   createOfficerExclusion,
   updateOfficerExclusion,
   deleteOfficerExclusion,
+  checkExclusion,
+  getActiveExclusions,
   importOfficerExclusions,
   exportOfficerExclusions,
 } from "../controllers/officerExclusion.controller";
@@ -16,6 +18,18 @@ const upload = multer({ dest: "uploads/" });
 const router = Router();
 
 router.get("/", authenticateJWT, authorizeRoles("admin"), getOfficerExclusions);
+router.get(
+  "/active",
+  authenticateJWT,
+  authorizeRoles("admin"),
+  getActiveExclusions
+);
+router.get(
+  "/check",
+  authenticateJWT,
+  authorizeRoles("admin", "student"),
+  checkExclusion
+);
 router.get(
   "/:id",
   authenticateJWT,

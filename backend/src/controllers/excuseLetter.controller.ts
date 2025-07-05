@@ -44,7 +44,7 @@ export const getExcuseLetter = async (req: Request, res: Response) => {
 export const createExcuseLetter = async (req: Request, res: Response) => {
   try {
     const { eventId, reason } = req.body;
-    const userId = (req as any).user.id; // Get user ID from JWT
+    const userId = (req as any).user.userId; // Get user ID from JWT
 
     if (!req.file) {
       res.status(400).json({ message: "File is required" });
@@ -87,7 +87,7 @@ export const createExcuseLetter = async (req: Request, res: Response) => {
 export const updateExcuseLetter = async (req: Request, res: Response) => {
   try {
     const { status } = req.body;
-    const userId = (req as any).user.id;
+    const userId = (req as any).user.userId;
 
     if (!status || !["approved", "rejected"].includes(status)) {
       res

@@ -18,23 +18,13 @@ import multer from "multer";
 const upload = multer({ dest: "uploads/" });
 const router = Router();
 
+// Specific routes must come before parameterized routes
 router.get("/", authenticateJWT, getStudents);
-router.get("/:id", authenticateJWT, getStudent);
 router.get(
   "/import-template",
   authenticateJWT,
   authorizeRoles("admin"),
   downloadImportTemplate
-);
-router.post("/", authenticateJWT, authorizeRoles("admin"), createStudent);
-router.put("/:id", authenticateJWT, authorizeRoles("admin"), updateStudent);
-router.delete("/:id", authenticateJWT, authorizeRoles("admin"), deleteStudent);
-router.post(
-  "/import",
-  authenticateJWT,
-  authorizeRoles("admin"),
-  upload.single("file"),
-  importStudents
 );
 router.get("/export", authenticateJWT, authorizeRoles("admin"), exportStudents);
 router.post(
@@ -49,5 +39,18 @@ router.post(
   authorizeRoles("admin"),
   downloadQRCodes
 );
+router.post(
+  "/import",
+  authenticateJWT,
+  authorizeRoles("admin"),
+  upload.single("file"),
+  importStudents
+);
+router.post("/", authenticateJWT, authorizeRoles("admin"), createStudent);
+
+// Parameterized routes come last
+router.get("/:id", authenticateJWT, getStudent);
+router.put("/:id", authenticateJWT, authorizeRoles("admin"), updateStudent);
+router.delete("/:id", authenticateJWT, authorizeRoles("admin"), deleteStudent);
 
 export default router;

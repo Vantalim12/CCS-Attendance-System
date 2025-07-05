@@ -7,7 +7,8 @@ import fs from "fs";
 
 export async function importStudentsFromExcel(
   filePath: string,
-  organizationId: string
+  organizationId: string,
+  userId: string
 ) {
   const workbook = xlsx.readFile(filePath);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -52,9 +53,10 @@ export async function importStudentsFromExcel(
       }
 
       // Generate QR code
-      const qrCodeData = generateQRCode(row.student_id, row.student_name);
+      const qrCodeData = await generateQRCode(row.student_id, row.student_name);
 
       const student = await Student.create({
+        userId,
         studentId: row.student_id,
         studentName: row.student_name,
         yearLevel: row.year_level,

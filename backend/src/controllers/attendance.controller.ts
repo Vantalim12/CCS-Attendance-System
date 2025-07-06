@@ -60,13 +60,29 @@ export const createAttendance = async (req: Request, res: Response) => {
       res.status(400).json({ message: "Missing required fields" });
       return;
     }
+
     // Parse and validate QR
     const parsed = parseQRCode(qrCodeData);
     if (!parsed) {
       res.status(400).json({ message: "Invalid QR code format" });
       return;
     }
-    const student = await Student.findOne({ studentId: parsed.studentId });
+
+    // First try to find by studentId
+    let student = await Student.findOne({ studentId: parsed.studentId });
+
+    // If not found, try to find by QR code data directly
+    if (!student) {
+      student = await Student.findOne({ qrCodeData: qrCodeData });
+    }
+
+    // If still not found, try to find by partial QR code match
+    if (!student) {
+      student = await Student.findOne({
+        qrCodeData: { $regex: `^${parsed.studentId}-`, $options: "i" },
+      });
+    }
+
     if (!student) {
       res.status(404).json({ message: "Student not found" });
       return;
@@ -76,6 +92,7 @@ export const createAttendance = async (req: Request, res: Response) => {
       res.status(404).json({ message: "Organization not found" });
       return;
     }
+
     if (!validateQRCode(qrCodeData, organization.name)) {
       res.status(400).json({ message: "Invalid QR code" });
       return;

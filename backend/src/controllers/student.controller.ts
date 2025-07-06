@@ -114,7 +114,13 @@ export const createStudent = async (req: Request, res: Response) => {
     const studentName = `${firstName} ${lastName}`;
 
     // Generate QR code data
-    const qrCodeData = await generateQRCode(studentId, studentName);
+    const orgId = req.body.organizationId || "507f1f77bcf86cd799439011";
+    const qrCodeData = await generateQRCode(
+      studentId,
+      studentName,
+      false,
+      orgId
+    );
 
     // Get userId from authenticated user
     const userId = (req as any).user?.userId;
@@ -180,9 +186,14 @@ export const updateStudent = async (req: Request, res: Response) => {
 
       // Regenerate QR code if student ID or name changed
       if (updateData.studentName) {
+        const currentStudent = await Student.findById(req.params.id);
+        const orgId =
+          currentStudent?.organizationId || "507f1f77bcf86cd799439011";
         updateData.qrCodeData = await generateQRCode(
           studentId,
-          updateData.studentName
+          updateData.studentName,
+          false,
+          String(orgId)
         );
       }
     }
@@ -250,7 +261,8 @@ export const generateQRCodes = async (req: Request, res: Response) => {
       const qrCodeBase64 = await generateQRCode(
         student.studentId,
         student.studentName,
-        true
+        true,
+        String(student.organizationId)
       );
       qrCodes[String(student._id)] = `data:image/png;base64,${qrCodeBase64}`;
     }
@@ -302,7 +314,8 @@ export const downloadQRCodes = async (req: Request, res: Response) => {
         const qrCodeBase64 = await generateQRCode(
           student.studentId,
           student.studentName,
-          true
+          true,
+          String(student.organizationId)
         );
 
         // Add QR code to PDF (convert base64 to buffer)

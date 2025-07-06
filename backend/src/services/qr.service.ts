@@ -20,10 +20,10 @@ export function validateQRCode(qrData: string, orgSecret: string): boolean {
 export async function generateQRCode(
   studentId: string,
   studentName: string,
-  returnBase64: boolean = false
+  returnBase64: boolean = false,
+  organizationId: string = "DEFAULT_ORG"
 ): Promise<string> {
   // Generate a unique QR code data string
-  const organizationId = "DEFAULT_ORG"; // This should come from context in real implementation
   const timestamp = Date.now().toString();
   const hash = crypto
     .createHash("sha256")

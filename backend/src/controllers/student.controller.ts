@@ -123,23 +123,50 @@ export const createStudent = async (req: Request, res: Response) => {
     }
 
     // Get organization to use for QR code generation
-    const defaultOrgId = "507f1f77bcf86cd799439011";
-    const finalOrgId = organizationId || defaultOrgId;
+    let finalOrgId = organizationId;
+
+    // If no organization ID provided, find the Default Organization
+    if (!finalOrgId) {
+      const defaultOrg = await Organization.findOne({
+        name: "Default Organization",
+      });
+      if (defaultOrg) {
+        finalOrgId = defaultOrg._id;
+        console.log("Using Default Organization:", finalOrgId);
+      } else {
+        // If Default Organization doesn't exist, use any available organization
+        const anyOrg = await Organization.findOne({});
+        if (anyOrg) {
+          finalOrgId = anyOrg._id;
+          console.log("Using available organization:", anyOrg.name, finalOrgId);
+        } else {
+          res.status(400).json({
+            message:
+              "No organizations available. Please create an organization first.",
+          });
+          return;
+        }
+      }
+    }
 
     // Find the organization to get its name/identifier for QR code
     const organization = await Organization.findById(finalOrgId);
-    let orgIdentifier = "DEFAULT";
-
-    if (organization) {
-      // Create a simple identifier from the organization name
-      orgIdentifier = organization.name.replace(/\s+/g, "").substring(0, 10);
+    if (!organization) {
+      res.status(404).json({ message: "Organization not found" });
+      return;
     }
+
+    // Create a simple identifier from the organization name
+    const orgIdentifier = organization.name
+      .replace(/\s+/g, "")
+      .substring(0, 10);
 
     console.log("Creating student with QR code:", {
       studentId,
       studentName,
       orgIdentifier,
       organizationId: finalOrgId,
+      organizationName: organization.name,
     });
 
     // Generate QR code data with organization identifier
@@ -442,8 +469,37 @@ export const importStudents = async (req: Request, res: Response) => {
     }
 
     const userId = (req as any).user.userId;
-    const organizationId =
-      req.body.organizationId || "507f1f77bcf86cd799439011"; // Default org
+    let organizationId = req.body.organizationId;
+
+    // If no organization ID provided, find the Default Organization
+    if (!organizationId) {
+      const defaultOrg = await Organization.findOne({
+        name: "Default Organization",
+      });
+      if (defaultOrg) {
+        organizationId = defaultOrg._id;
+        console.log("Import using Default Organization:", organizationId);
+      } else {
+        // If Default Organization doesn't exist, use any available organization
+        const anyOrg = await Organization.findOne({});
+        if (anyOrg) {
+          organizationId = anyOrg._id;
+          console.log(
+            "Import using available organization:",
+            anyOrg.name,
+            organizationId
+          );
+        } else {
+          res
+            .status(400)
+            .json({
+              message:
+                "No organizations available. Please create an organization first.",
+            });
+          return;
+        }
+      }
+    }
 
     const result = await importStudentsFromExcel(
       req.file.path,
@@ -472,8 +528,38 @@ export const importStudents = async (req: Request, res: Response) => {
 
 export const exportStudents = async (req: Request, res: Response) => {
   try {
-    const organizationId =
-      (req.query.organizationId as string) || "507f1f77bcf86cd799439011";
+    let organizationId = req.query.organizationId as string;
+
+    // If no organization ID provided, find the Default Organization
+    if (!organizationId) {
+      const defaultOrg = await Organization.findOne({
+        name: "Default Organization",
+      });
+      if (defaultOrg) {
+        organizationId = String(defaultOrg._id);
+        console.log("Export using Default Organization:", organizationId);
+      } else {
+        // If Default Organization doesn't exist, use any available organization
+        const anyOrg = await Organization.findOne({});
+        if (anyOrg) {
+          organizationId = String(anyOrg._id);
+          console.log(
+            "Export using available organization:",
+            anyOrg.name,
+            organizationId
+          );
+        } else {
+          res
+            .status(400)
+            .json({
+              message:
+                "No organizations available. Please create an organization first.",
+            });
+          return;
+        }
+      }
+    }
+
     const filePath = path.join("uploads", `students_export_${Date.now()}.xlsx`);
 
     await exportStudentsToExcel(organizationId, filePath);

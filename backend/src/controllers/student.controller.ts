@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import Student from "../models/Student";
+import Organization from "../models/Organization";
 import {
   importStudentsFromExcel,
   exportStudentsToExcel,
@@ -101,6 +102,7 @@ export const createStudent = async (req: Request, res: Response) => {
       major,
       departmentProgram,
       status,
+      organizationId,
     } = req.body;
 
     // Check if student ID already exists
@@ -113,21 +115,42 @@ export const createStudent = async (req: Request, res: Response) => {
     // Combine first and last name for studentName field
     const studentName = `${firstName} ${lastName}`;
 
-    // Generate QR code data
-    const orgId = req.body.organizationId || "507f1f77bcf86cd799439011";
-    const qrCodeData = await generateQRCode(
-      studentId,
-      studentName,
-      false,
-      orgId
-    );
-
     // Get userId from authenticated user
     const userId = (req as any).user?.userId;
     if (!userId) {
       res.status(401).json({ message: "User not authenticated" });
       return;
     }
+
+    // Get organization to use for QR code generation
+    const defaultOrgId = "507f1f77bcf86cd799439011";
+    const finalOrgId = organizationId || defaultOrgId;
+
+    // Find the organization to get its name/identifier for QR code
+    const organization = await Organization.findById(finalOrgId);
+    let orgIdentifier = "DEFAULT";
+
+    if (organization) {
+      // Create a simple identifier from the organization name
+      orgIdentifier = organization.name.replace(/\s+/g, "").substring(0, 10);
+    }
+
+    console.log("Creating student with QR code:", {
+      studentId,
+      studentName,
+      orgIdentifier,
+      organizationId: finalOrgId,
+    });
+
+    // Generate QR code data with organization identifier
+    const qrCodeData = await generateQRCode(
+      studentId,
+      studentName,
+      false,
+      orgIdentifier
+    );
+
+    console.log("Generated QR code data:", qrCodeData);
 
     const student = await Student.create({
       userId,
@@ -138,8 +161,10 @@ export const createStudent = async (req: Request, res: Response) => {
       departmentProgram,
       status: status || "regular",
       qrCodeData,
-      organizationId: req.body.organizationId || "507f1f77bcf86cd799439011", // Default org for now
+      organizationId: finalOrgId,
     });
+
+    console.log("Student created successfully:", student.studentId);
 
     // Transform student data to match frontend expectations
     const transformedStudent = {
@@ -187,20 +212,41 @@ export const updateStudent = async (req: Request, res: Response) => {
       // Regenerate QR code if student ID or name changed
       if (updateData.studentName) {
         const currentStudent = await Student.findById(req.params.id);
-        const orgId =
-          currentStudent?.organizationId || "507f1f77bcf86cd799439011";
-        updateData.qrCodeData = await generateQRCode(
-          studentId,
-          updateData.studentName,
-          false,
-          String(orgId)
-        );
+        if (currentStudent) {
+          // Get organization for QR code generation
+          const organization = await Organization.findById(
+            currentStudent.organizationId
+          );
+          let orgIdentifier = "DEFAULT";
+
+          if (organization) {
+            orgIdentifier = organization.name
+              .replace(/\s+/g, "")
+              .substring(0, 10);
+          }
+
+          console.log("Regenerating QR code for student:", {
+            studentId,
+            studentName: updateData.studentName,
+            orgIdentifier,
+          });
+
+          updateData.qrCodeData = await generateQRCode(
+            studentId,
+            updateData.studentName,
+            false,
+            orgIdentifier
+          );
+
+          console.log("New QR code data:", updateData.qrCodeData);
+        }
       }
     }
 
     const student = await Student.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
     });
+
     if (!student) {
       res.status(404).json({ message: "Student not found" });
       return;
@@ -208,13 +254,10 @@ export const updateStudent = async (req: Request, res: Response) => {
 
     // Transform student data to match frontend expectations
     const nameParts = student.studentName.split(" ");
-    const responseFirstName = nameParts[0] || "";
-    const responseLastName = nameParts.slice(1).join(" ") || "";
-
     const transformedStudent = {
       ...student.toObject(),
-      firstName: responseFirstName,
-      lastName: responseLastName,
+      firstName: nameParts[0] || "",
+      lastName: nameParts.slice(1).join(" ") || "",
       email: "", // Placeholder - we don't have email in the model yet
     };
 
@@ -224,6 +267,7 @@ export const updateStudent = async (req: Request, res: Response) => {
     });
     return;
   } catch (error) {
+    console.error("Student update error:", error);
     res.status(500).json({ message: "Failed to update student", error });
     return;
   }
@@ -254,15 +298,23 @@ export const generateQRCodes = async (req: Request, res: Response) => {
     }
 
     const students = await Student.find({ _id: { $in: studentIds } });
-    const qrCodes: { [key: string]: string } = {};
+    const qrCodes: Record<string, string> = {};
 
     for (const student of students) {
-      // Generate QR code as base64 image
+      // Get organization for QR code generation
+      const organization = await Organization.findById(student.organizationId);
+      let orgIdentifier = "DEFAULT";
+
+      if (organization) {
+        // Create a simple identifier from the organization name
+        orgIdentifier = organization.name.replace(/\s+/g, "").substring(0, 10);
+      }
+
       const qrCodeBase64 = await generateQRCode(
         student.studentId,
         student.studentName,
         true,
-        String(student.organizationId)
+        orgIdentifier
       );
       qrCodes[String(student._id)] = `data:image/png;base64,${qrCodeBase64}`;
     }
@@ -310,12 +362,25 @@ export const downloadQRCodes = async (req: Request, res: Response) => {
 
     for (const student of students) {
       try {
+        // Get organization for QR code generation
+        const organization = await Organization.findById(
+          student.organizationId
+        );
+        let orgIdentifier = "DEFAULT";
+
+        if (organization) {
+          // Create a simple identifier from the organization name
+          orgIdentifier = organization.name
+            .replace(/\s+/g, "")
+            .substring(0, 10);
+        }
+
         // Generate QR code as base64 image
         const qrCodeBase64 = await generateQRCode(
           student.studentId,
           student.studentName,
           true,
-          String(student.organizationId)
+          orgIdentifier
         );
 
         // Add QR code to PDF (convert base64 to buffer)

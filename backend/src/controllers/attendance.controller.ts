@@ -5,7 +5,12 @@ import Student from "../models/Student";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 import Organization from "../models/Organization";
-import { parseQRCode, validateQRCode } from "../services/qr.service";
+import {
+  parseQRCode,
+  validateQRCode,
+  extractBaseStudentId,
+  validateStudentQRCode,
+} from "../services/qr.service";
 
 export const getAttendances = async (req: Request, res: Response) => {
   try {
@@ -24,7 +29,49 @@ export const getAttendances = async (req: Request, res: Response) => {
       .populate("eventId", "title eventDate startTime endTime")
       .sort({ createdAt: -1 });
 
-    res.json(attendances);
+    // Transform data to match frontend expectations
+    const transformedAttendances = attendances
+      .map((record) => {
+        const student = record.studentId as any;
+        const event = record.eventId as any;
+
+        if (!student || !event) {
+          return null; // Skip records with missing data
+        }
+
+        // Split studentName into firstName and lastName
+        const nameParts = (student.studentName || "").split(" ");
+        const firstName = nameParts[0] || "";
+        const lastName = nameParts.slice(1).join(" ") || "";
+
+        return {
+          _id: record._id,
+          student: {
+            _id: student._id,
+            firstName: firstName,
+            lastName: lastName,
+            studentId: student.studentId || "",
+            email: student.email || "",
+            yearLevel: student.yearLevel || "",
+            major: student.major || "",
+          },
+          event: event._id,
+          eventTitle: event.title || "Unknown Event",
+          morningStatus: record.signInMorning ? "present" : "absent",
+          afternoonStatus: record.signInAfternoon ? "present" : "absent",
+          morningCheckIn: record.signInMorning
+            ? record.signInMorning.toISOString()
+            : undefined,
+          afternoonCheckIn: record.signInAfternoon
+            ? record.signInAfternoon.toISOString()
+            : undefined,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        };
+      })
+      .filter((record) => record !== null); // Remove null records
+
+    res.json(transformedAttendances);
     return;
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch attendances", error });
@@ -56,53 +103,158 @@ export const getAttendance = async (req: Request, res: Response) => {
 export const createAttendance = async (req: Request, res: Response) => {
   try {
     const { qrCodeData, eventId, session } = req.body; // session: 'morning' | 'afternoon'
+
     if (!qrCodeData || !eventId || !session) {
       res.status(400).json({ message: "Missing required fields" });
       return;
     }
 
+    console.log("QR Attendance Request:", { qrCodeData, eventId, session });
+
     // Parse and validate QR
     const parsed = parseQRCode(qrCodeData);
+    console.log("Parsed QR Code:", parsed);
+
     if (!parsed) {
       res.status(400).json({ message: "Invalid QR code format" });
       return;
     }
 
-    // First try to find by studentId
-    let student = await Student.findOne({ studentId: parsed.studentId });
+    // Enhanced student lookup with better logging
+    let student = null;
 
-    // If not found, try to find by QR code data directly
+    // Method 1: Try exact student ID match
+    console.log("Looking for student with ID:", parsed.studentId);
+    student = await Student.findOne({ studentId: parsed.studentId });
+    console.log("Student found by ID:", student ? "Yes" : "No");
+
+    // Method 2: Try exact QR code match
     if (!student) {
+      console.log("Trying exact QR code match:", qrCodeData);
       student = await Student.findOne({ qrCodeData: qrCodeData });
+      console.log("Student found by exact QR match:", student ? "Yes" : "No");
     }
 
-    // If still not found, try to find by partial QR code match
+    // Method 3: Try to find by base student ID (e.g., "2021" from "2021-1304")
     if (!student) {
+      console.log("Trying to find student by base ID pattern");
+      student = await Student.findOne({
+        studentId: { $regex: `^${parsed.studentId}(-|$)`, $options: "i" },
+      });
+      console.log("Student found by base ID pattern:", student ? "Yes" : "No");
+    }
+
+    // Method 4: Try partial QR code match as fallback
+    if (!student) {
+      console.log(
+        "Trying partial QR code match for studentId:",
+        parsed.studentId
+      );
       student = await Student.findOne({
         qrCodeData: { $regex: `^${parsed.studentId}-`, $options: "i" },
       });
+      console.log("Student found by partial QR match:", student ? "Yes" : "No");
+    }
+
+    // Method 5: Try to find by any student ID that starts with the parsed ID
+    if (!student) {
+      console.log("Trying broader student ID search");
+      const allStudents = await Student.find({
+        studentId: { $regex: parsed.studentId, $options: "i" },
+      });
+      console.log("Students found by broader search:", allStudents.length);
+
+      if (allStudents.length === 1) {
+        student = allStudents[0];
+        console.log("Using single matched student:", student.studentId);
+      } else if (allStudents.length > 1) {
+        console.log(
+          "Multiple students found, trying to match by QR validation"
+        );
+        for (const s of allStudents) {
+          const org = await Organization.findById(s.organizationId);
+          if (
+            org &&
+            validateStudentQRCode(
+              qrCodeData,
+              s.studentId,
+              s.studentName,
+              org.name
+            )
+          ) {
+            student = s;
+            console.log(
+              "Found matching student via QR validation:",
+              s.studentId
+            );
+            break;
+          }
+        }
+      }
     }
 
     if (!student) {
+      console.log("Student not found with any method");
       res.status(404).json({ message: "Student not found" });
       return;
     }
+
+    console.log("Found student:", {
+      id: student._id,
+      studentId: student.studentId,
+      name: student.studentName,
+    });
+
+    // Get organization and validate
     const organization = await Organization.findById(student.organizationId);
+    console.log(
+      "Organization lookup for ID:",
+      student.organizationId,
+      "Found:",
+      organization ? "Yes" : "No"
+    );
+
     if (!organization) {
       res.status(404).json({ message: "Organization not found" });
       return;
     }
 
-    if (!validateQRCode(qrCodeData, organization.name)) {
+    // Enhanced QR validation
+    console.log("Validating QR code with organization:", organization.name);
+
+    // Try the basic validation first
+    let isValidQR = validateQRCode(qrCodeData, organization.name);
+    console.log("Basic QR validation result:", isValidQR);
+
+    // If basic validation passes, try enhanced validation
+    if (isValidQR) {
+      const enhancedValidation = validateStudentQRCode(
+        qrCodeData,
+        student.studentId,
+        student.studentName,
+        organization.name
+      );
+      console.log("Enhanced QR validation result:", enhancedValidation);
+
+      // For now, we'll accept if either validation passes
+      // In production, you might want to be more strict
+      isValidQR = isValidQR || enhancedValidation;
+    }
+
+    if (!isValidQR) {
       res.status(400).json({ message: "Invalid QR code" });
       return;
     }
+
     // Check event
     const event = await Event.findById(eventId);
+    console.log("Event lookup:", event ? "Found" : "Not found");
+
     if (!event) {
       res.status(404).json({ message: "Event not found" });
       return;
     }
+
     const now = new Date();
     const eventDate = new Date(event.eventDate);
     const [startHour, startMinute] = event.startTime.split(":").map(Number);
@@ -111,24 +263,45 @@ export const createAttendance = async (req: Request, res: Response) => {
     eventStart.setHours(startHour, startMinute, 0, 0);
     const eventEnd = new Date(eventDate);
     eventEnd.setHours(endHour, endMinute, 0, 0);
+
     // Allow scan 15 min before event start
     const scanWindowStart = new Date(eventStart.getTime() - 15 * 60 * 1000);
     // Grace period: 1 hour after event start
     const gracePeriodEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+
+    console.log("Time validation:", {
+      now: now.toISOString(),
+      eventDate: eventDate.toISOString(),
+      eventStart: eventStart.toISOString(),
+      eventEnd: eventEnd.toISOString(),
+      scanWindowStart: scanWindowStart.toISOString(),
+      gracePeriodEnd: gracePeriodEnd.toISOString(),
+      canScanNow: now >= scanWindowStart && now <= gracePeriodEnd,
+    });
+
     if (now < scanWindowStart) {
+      console.log("Scan rejected: Too early");
       res.status(400).json({ message: "Scan not allowed yet" });
       return;
     }
     if (now > gracePeriodEnd) {
+      console.log("Scan rejected: Too late");
       res.status(400).json({ message: "Scan window closed" });
       return;
     }
+
     // Prevent duplicate scan
     let attendance = await Attendance.findOne({
       studentId: student._id,
       eventId,
     });
+    console.log(
+      "Existing attendance record:",
+      attendance ? "Found" : "Not found"
+    );
+
     if (!attendance) {
+      console.log("Creating new attendance record for session:", session);
       attendance = await Attendance.create({
         studentId: student._id,
         eventId,
@@ -136,27 +309,39 @@ export const createAttendance = async (req: Request, res: Response) => {
         signInMorning: session === "morning" ? now : undefined,
         signInAfternoon: session === "afternoon" ? now : undefined,
       });
+      console.log("Attendance created successfully:", attendance._id);
       res.status(201).json({ message: "Attendance marked", attendance });
       return;
     } else {
       // Already signed in for this session?
+      console.log("Checking existing attendance for session:", session, {
+        morningSignIn: attendance.signInMorning,
+        afternoonSignIn: attendance.signInAfternoon,
+      });
+
       if (session === "morning" && attendance.signInMorning) {
+        console.log("Already signed in for morning session");
         res.status(400).json({ message: "Already signed in (morning)" });
         return;
       }
       if (session === "afternoon" && attendance.signInAfternoon) {
+        console.log("Already signed in for afternoon session");
         res.status(400).json({ message: "Already signed in (afternoon)" });
         return;
       }
+
       // Update attendance for session
+      console.log("Updating attendance for session:", session);
       if (session === "morning") attendance.signInMorning = now;
       if (session === "afternoon") attendance.signInAfternoon = now;
       attendance.status = "present";
       await attendance.save();
+      console.log("Attendance updated successfully");
       res.status(200).json({ message: "Attendance updated", attendance });
       return;
     }
   } catch (error) {
+    console.error("Attendance creation error:", error);
     res.status(500).json({ message: "Failed to mark attendance", error });
     return;
   }
@@ -372,20 +557,20 @@ export const generateReport = async (req: Request, res: Response) => {
     }
 
     if (eventId) {
-      filter.event = eventId;
+      filter.eventId = eventId;
     }
 
     if (studentId) {
-      filter.student = studentId;
+      filter.studentId = studentId;
     }
 
     // Fetch attendance records with populated data
     let attendanceQuery = Attendance.find(filter)
       .populate(
         "studentId",
-        "firstName lastName studentId yearLevel major program status"
+        "studentName studentId yearLevel major departmentProgram status"
       )
-      .populate("eventId", "title startDate endDate")
+      .populate("eventId", "title eventDate startTime endTime")
       .sort({ createdAt: -1 });
 
     const attendanceRecords = await attendanceQuery;
@@ -394,15 +579,17 @@ export const generateReport = async (req: Request, res: Response) => {
     let filteredRecords = attendanceRecords;
 
     if (yearLevel) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).yearLevel === yearLevel
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.yearLevel === yearLevel;
+      });
     }
 
     if (major) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).major === major
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.major === major;
+      });
     }
 
     if (status && status !== "all") {
@@ -423,10 +610,60 @@ export const generateReport = async (req: Request, res: Response) => {
       });
     }
 
+    // Transform data to match frontend expectations
+    const transformedRecords = filteredRecords
+      .filter((record) => {
+        // Filter out records with missing data or null populated objects
+        const student = record.studentId as any;
+        const event = record.eventId as any;
+        return (
+          record.studentId &&
+          record.eventId &&
+          student &&
+          event &&
+          student._id &&
+          event._id
+        );
+      })
+      .map((record) => {
+        const student = record.studentId as any;
+        const event = record.eventId as any;
+
+        // Split studentName into firstName and lastName
+        const nameParts = (student.studentName || "").split(" ");
+        const firstName = nameParts[0] || "";
+        const lastName = nameParts.slice(1).join(" ") || "";
+
+        return {
+          _id: record._id,
+          student: {
+            _id: student._id,
+            firstName: firstName,
+            lastName: lastName,
+            studentId: student.studentId || "",
+            email: student.email || "",
+            yearLevel: student.yearLevel || "",
+            major: student.major || "",
+          },
+          event: event._id,
+          eventTitle: event.title || "Unknown Event",
+          morningStatus: record.signInMorning ? "present" : "absent",
+          afternoonStatus: record.signInAfternoon ? "present" : "absent",
+          morningCheckIn: record.signInMorning
+            ? record.signInMorning.toISOString()
+            : undefined,
+          afternoonCheckIn: record.signInAfternoon
+            ? record.signInAfternoon.toISOString()
+            : undefined,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        };
+      });
+
     res.json({
       success: true,
-      attendanceRecords: filteredRecords,
-      totalRecords: filteredRecords.length,
+      attendanceRecords: transformedRecords,
+      totalRecords: transformedRecords.length,
     });
   } catch (error) {
     console.error("Generate report error:", error);
@@ -466,35 +703,37 @@ export const exportToExcel = async (req: Request, res: Response) => {
     }
 
     if (eventId) {
-      filter.event = eventId;
+      filter.eventId = eventId;
     }
 
     if (studentId) {
-      filter.student = studentId;
+      filter.studentId = studentId;
     }
 
     // Fetch data
     const attendanceRecords = await Attendance.find(filter)
       .populate(
         "studentId",
-        "firstName lastName studentId yearLevel major program status"
+        "studentName studentId yearLevel major departmentProgram status"
       )
-      .populate("eventId", "title startDate endDate")
+      .populate("eventId", "title eventDate startTime endTime")
       .sort({ createdAt: -1 });
 
     // Apply additional filters
     let filteredRecords = attendanceRecords;
 
     if (yearLevel) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).yearLevel === yearLevel
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.yearLevel === yearLevel;
+      });
     }
 
     if (major) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).major === major
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.major === major;
+      });
     }
 
     if (status && status !== "all") {
@@ -547,12 +786,15 @@ export const exportToExcel = async (req: Request, res: Response) => {
       const student = record.studentId as any;
       const event = record.eventId as any;
 
+      // Skip records with null populated objects
+      if (!student || !event) return;
+
       worksheet.addRow({
-        studentId: student.studentId,
-        studentName: `${student.firstName} ${student.lastName}`,
-        yearLevel: student.yearLevel,
-        major: student.major,
-        event: event.title,
+        studentId: student.studentId || "",
+        studentName: student.studentName || "",
+        yearLevel: student.yearLevel || "",
+        major: student.major || "",
+        event: event.title || "",
         date: new Date(record.createdAt).toLocaleDateString(),
         morningStatus: record.signInMorning ? "present" : "absent",
         morningCheckIn: record.signInMorning
@@ -619,32 +861,34 @@ export const exportToPDF = async (req: Request, res: Response) => {
     }
 
     if (eventId) {
-      filter.event = eventId;
+      filter.eventId = eventId;
     }
 
     if (studentId) {
-      filter.student = studentId;
+      filter.studentId = studentId;
     }
 
     // Fetch data
     const attendanceRecords = await Attendance.find(filter)
-      .populate("studentId", "firstName lastName studentId yearLevel major")
-      .populate("eventId", "title startDate endDate")
+      .populate("studentId", "studentName studentId yearLevel major")
+      .populate("eventId", "title eventDate startTime endTime")
       .sort({ createdAt: -1 });
 
     // Apply additional filters
     let filteredRecords = attendanceRecords;
 
     if (yearLevel) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).yearLevel === yearLevel
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.yearLevel === yearLevel;
+      });
     }
 
     if (major) {
-      filteredRecords = filteredRecords.filter(
-        (record) => (record.studentId as any).major === major
-      );
+      filteredRecords = filteredRecords.filter((record) => {
+        const student = record.studentId as any;
+        return student && student.major === major;
+      });
     }
 
     if (status && status !== "all") {
@@ -679,6 +923,17 @@ export const exportToPDF = async (req: Request, res: Response) => {
 
     // Pipe PDF to response
     doc.pipe(res);
+
+    // Handle pipe errors
+    doc.on("error", (err) => {
+      console.error("PDF generation error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Failed to generate PDF",
+        });
+      }
+    });
 
     // Add title
     doc.fontSize(20).text("Attendance Report", { align: "center" });
@@ -719,16 +974,19 @@ export const exportToPDF = async (req: Request, res: Response) => {
       const student = record.studentId as any;
       const event = record.eventId as any;
 
+      // Skip records with null populated objects
+      if (!student || !event) return;
+
       if (index > 0 && index % 20 === 0) {
         doc.addPage();
       }
 
       doc.text(
-        `${index + 1}. ${student.firstName} ${student.lastName} (${
-          student.studentId
+        `${index + 1}. ${student.studentName || "Unknown Student"} (${
+          student.studentId || "N/A"
         })`
       );
-      doc.text(`   Event: ${event.title}`);
+      doc.text(`   Event: ${event.title || "Unknown Event"}`);
       doc.text(`   Date: ${new Date(record.createdAt).toLocaleDateString()}`);
       doc.text(
         `   Morning: ${
@@ -751,9 +1009,11 @@ export const exportToPDF = async (req: Request, res: Response) => {
     doc.end();
   } catch (error) {
     console.error("Export to PDF error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to export to PDF",
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: "Failed to export to PDF",
+      });
+    }
   }
 };

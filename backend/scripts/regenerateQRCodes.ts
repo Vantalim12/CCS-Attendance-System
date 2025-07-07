@@ -1,62 +1,84 @@
-import mongoose from "mongoose";
+import dotenv from "dotenv";
+import { connectDB } from "../src/utils/db";
 import Student from "../src/models/Student";
+import Organization from "../src/models/Organization";
 import { generateQRCode } from "../src/services/qr.service";
 
-// Connect to MongoDB
-const connectDB = async () => {
-  try {
-    await mongoose.connect("mongodb://localhost:27017/attendance-system", {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    } as any);
-    console.log("MongoDB connected");
-  } catch (error) {
-    console.error("MongoDB connection error:", error);
-    process.exit(1);
-  }
-};
+// Load environment variables
+dotenv.config();
 
-const regenerateQRCodes = async () => {
+async function regenerateQRCodes() {
   try {
+    // Connect to database
     await connectDB();
+    console.log("Connected to database");
 
-    console.log("Starting QR code regeneration...");
-
+    // Get all students
     const students = await Student.find({});
     console.log(`Found ${students.length} students`);
 
+    let updatedCount = 0;
+    let errorCount = 0;
+
     for (const student of students) {
       try {
+        // Get organization for this student
+        const organization = await Organization.findById(
+          student.organizationId
+        );
+        let orgIdentifier = "DEFAULT";
+
+        if (organization) {
+          // Create a simple identifier from the organization name
+          orgIdentifier = organization.name
+            .replace(/\s+/g, "")
+            .substring(0, 10);
+        }
+
         console.log(
-          `Processing student: ${student.studentId} - ${student.studentName}`
+          `Processing student: ${student.studentId} (${student.studentName})`
+        );
+        console.log(
+          `  Organization: ${
+            organization?.name || "Unknown"
+          } (${orgIdentifier})`
         );
 
-        // Generate new QR code with correct organization ID
-        const newQRCode = await generateQRCode(
+        // Generate new QR code
+        const newQRCodeData = await generateQRCode(
           student.studentId,
           student.studentName,
           false,
-          String(student.organizationId)
+          orgIdentifier
         );
+
+        console.log(`  Old QR: ${student.qrCodeData}`);
+        console.log(`  New QR: ${newQRCodeData}`);
 
         // Update student with new QR code
         await Student.findByIdAndUpdate(student._id, {
-          qrCodeData: newQRCode,
+          qrCodeData: newQRCodeData,
         });
 
-        console.log(`Updated QR code for ${student.studentId}: ${newQRCode}`);
+        updatedCount++;
+        console.log(`  ✓ Updated QR code for ${student.studentId}`);
       } catch (error) {
-        console.error(`Error processing student ${student.studentId}:`, error);
+        console.error(`  ✗ Error updating ${student.studentId}:`, error);
+        errorCount++;
       }
     }
 
-    console.log("QR code regeneration completed!");
-  } catch (error) {
-    console.error("Error during QR code regeneration:", error);
-  } finally {
-    await mongoose.disconnect();
-  }
-};
+    console.log("\n=== Summary ===");
+    console.log(`Total students: ${students.length}`);
+    console.log(`Successfully updated: ${updatedCount}`);
+    console.log(`Errors: ${errorCount}`);
+    console.log("QR code regeneration completed");
 
-// Run the script
+    process.exit(0);
+  } catch (error) {
+    console.error("Error regenerating QR codes:", error);
+    process.exit(1);
+  }
+}
+
 regenerateQRCodes();

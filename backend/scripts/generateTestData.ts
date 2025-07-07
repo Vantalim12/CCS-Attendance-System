@@ -127,12 +127,13 @@ async function main() {
 
   const students = [];
   for (const data of studentData) {
-    // Generate proper QR code with correct organization ID
+    // Generate proper QR code with organization identifier
+    const orgIdentifier = org.name.replace(/\s+/g, "").substring(0, 10);
     const qrCodeData = await generateQRCode(
       data.studentId,
       data.studentName,
       false,
-      String(org._id)
+      orgIdentifier
     );
 
     const student = await Student.create({

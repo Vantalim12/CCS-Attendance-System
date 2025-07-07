@@ -1,5 +1,6 @@
 import xlsx from "xlsx";
 import Student from "../models/Student";
+import Organization from "../models/Organization";
 import OfficerExclusion from "../models/OfficerExclusion";
 import { generateQRCode } from "./qr.service";
 import { Request } from "express";
@@ -13,6 +14,17 @@ export async function importStudentsFromExcel(
   const workbook = xlsx.readFile(filePath);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const data = xlsx.utils.sheet_to_json(sheet);
+
+  // Get organization for QR code generation
+  const organization = await Organization.findById(organizationId);
+  let orgIdentifier = "DEFAULT";
+
+  if (organization) {
+    // Create a simple identifier from the organization name
+    orgIdentifier = organization.name.replace(/\s+/g, "").substring(0, 10);
+  }
+
+  console.log("Excel import using organization identifier:", orgIdentifier);
 
   const results = {
     successful: 0,
@@ -52,8 +64,15 @@ export async function importStudentsFromExcel(
         continue;
       }
 
-      // Generate QR code
-      const qrCodeData = await generateQRCode(row.student_id, row.student_name);
+      // Generate QR code with proper organization identifier
+      const qrCodeData = await generateQRCode(
+        row.student_id,
+        row.student_name,
+        false,
+        orgIdentifier
+      );
+
+      console.log(`Generated QR for ${row.student_id}: ${qrCodeData}`);
 
       const student = await Student.create({
         userId,
@@ -78,6 +97,7 @@ export async function importStudentsFromExcel(
     }
   }
 
+  console.log("Excel import completed:", results);
   return results;
 }
 

@@ -1,0 +1,22 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const officerExclusion_controller_1 = require("../controllers/officerExclusion.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const rbac_middleware_1 = require("../middleware/rbac.middleware");
+const multer_1 = __importDefault(require("multer"));
+const upload = (0, multer_1.default)({ dest: "uploads/" });
+const router = (0, express_1.Router)();
+router.get("/", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.getOfficerExclusions);
+router.get("/active", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.getActiveExclusions);
+router.get("/check", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin", "student"), officerExclusion_controller_1.checkExclusion);
+router.get("/:id", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.getOfficerExclusion);
+router.post("/", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.createOfficerExclusion);
+router.put("/:id", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.updateOfficerExclusion);
+router.delete("/:id", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.deleteOfficerExclusion);
+router.post("/import", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), upload.single("file"), officerExclusion_controller_1.importOfficerExclusions);
+router.get("/export", auth_middleware_1.authenticateJWT, (0, rbac_middleware_1.authorizeRoles)("admin"), officerExclusion_controller_1.exportOfficerExclusions);
+exports.default = router;

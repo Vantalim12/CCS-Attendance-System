@@ -12,3 +12,16 @@ frontend:
 
 npm install
 
+How to run ?
+
+In terminal: 
+
+cd backend
+
+npx ts-node src/server.ts
+
+cd ..
+
+cd frontend
+
+npm start

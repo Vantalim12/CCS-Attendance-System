@@ -1,18 +1,18 @@
 Do this all terminal
 
-Environment: 
+# Environment: 
 
-Backend:
+# Backend:
 
 npm install express cors dotenv
 
 npm install --save-dev @types/node @types/express @types/cors typescript ts-node
 
-Frontend:
+# Frontend:
 
 npm install
 
-##How to run ?
+# How to run ?
 
 In terminal: 
 
